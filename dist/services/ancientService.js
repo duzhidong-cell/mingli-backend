@@ -1,17 +1,20 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import { config } from '../config';
-export class AncientLibrary {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ancientLib = exports.AncientLibrary = void 0;
+const node_fs_1 = require("node:fs");
+const node_path_1 = require("node:path");
+const config_1 = require("../config");
+class AncientLibrary {
     books = [];
     contentCache = new Map();
     load() {
-        const dir = join(process.cwd(), config.ancientDir);
+        const dir = (0, node_path_1.join)(process.cwd(), config_1.config.ancientDir);
         try {
             const files = this.ensureDir(dir);
             this.books = files.map((f) => {
-                const file = join(dir, f);
-                const stat = statSync(file);
-                const raw = readFileSync(file, 'utf8');
+                const file = (0, node_path_1.join)(dir, f);
+                const stat = (0, node_fs_1.statSync)(file);
+                const raw = (0, node_fs_1.readFileSync)(file, 'utf8');
                 const lines = raw.replace(/^\uFEFF/, '').split('\n');
                 const introLine = lines.find((l) => l.startsWith('>')) || '';
                 return {
@@ -30,7 +33,7 @@ export class AncientLibrary {
     }
     ensureDir(dir) {
         try {
-            return readdirSync(dir).filter((f) => f.endsWith('.md'));
+            return (0, node_fs_1.readdirSync)(dir).filter((f) => f.endsWith('.md'));
         }
         catch {
             return [];
@@ -52,7 +55,7 @@ export class AncientLibrary {
         const cached = this.contentCache.get(id);
         if (cached != null)
             return cached;
-        const raw = readFileSync(join(process.cwd(), config.ancientDir, b.file), 'utf8')
+        const raw = (0, node_fs_1.readFileSync)((0, node_path_1.join)(process.cwd(), config_1.config.ancientDir, b.file), 'utf8')
             .replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
         this.contentCache.set(id, raw);
         return raw;
@@ -95,5 +98,6 @@ export class AncientLibrary {
         return out;
     }
 }
-export const ancientLib = new AncientLibrary();
+exports.AncientLibrary = AncientLibrary;
+exports.ancientLib = new AncientLibrary();
 //# sourceMappingURL=ancientService.js.map

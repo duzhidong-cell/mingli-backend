@@ -1,13 +1,19 @@
-import Fastify from 'fastify';
-import { registerRoutes } from './routes';
-import { config } from './config';
-import { startSchedule, stopSchedule } from './services/scraperService';
-import { cleanupDb, db } from './services/store';
-import { hasApiKey } from './services/aiService';
-import rateLimit from '@fastify/rate-limit';
-const app = Fastify({ logger: true });
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const fastify_1 = __importDefault(require("fastify"));
+const routes_1 = require("./routes");
+const config_1 = require("./config");
+const scraperService_1 = require("./services/scraperService");
+const store_1 = require("./services/store");
+const aiService_1 = require("./services/aiService");
+const manualMasters_1 = require("./data/manualMasters");
+const rate_limit_1 = __importDefault(require("@fastify/rate-limit"));
+const app = (0, fastify_1.default)({ logger: true });
 // 全局限流：默认宽松（静态接口），烧钱接口在路由内单独收紧
-app.register(rateLimit, {
+app.register(rate_limit_1.default, {
     max: 300,
     timeWindow: '1 minute',
     errorResponseBuilder: (req, context) => ({
@@ -16,11 +22,11 @@ app.register(rateLimit, {
         message: `请求过于频繁，请 ${context.after} 后再试`,
     }),
 });
-app.register(registerRoutes);
+app.register(routes_1.registerRoutes);
 // CORS（供 Expo 真机/浏览器调试）——收窄到允许来源，避免任意网页蹭 AI 额度
 app.addHook('onSend', async (_req, reply) => {
     const origin = _req.headers.origin;
-    const allowed = config.corsOrigins;
+    const allowed = config_1.config.corsOrigins;
     if (origin && (allowed.includes('*') || allowed.includes(origin))) {
         reply.header('Access-Control-Allow-Origin', origin);
         reply.header('Access-Control-Allow-Credentials', 'true');
@@ -47,22 +53,25 @@ app.setErrorHandler((err, req, reply) => {
     }
 });
 async function main() {
-    const removed = cleanupDb();
+    const removed = (0, store_1.cleanupDb)();
     if (removed)
         console.log(`[清理] 启动时清理 ${removed} 条过期/超量数据`);
-    await app.listen({ port: config.port, host: '0.0.0.0' });
-    console.log(`[启动] 趋吉避凶后端已运行 http://0.0.0.0:${config.port}`);
-    if (hasApiKey()) {
-        console.log(`[AI] ${config.aiProvider} 模式`);
+    const seeded = (0, manualMasters_1.seedManualArticles)();
+    if (seeded)
+        console.log(`[资料] 人工整理大师文献 ${seeded} 条已就绪`);
+    await app.listen({ port: config_1.config.port, host: '0.0.0.0' });
+    console.log(`[启动] 趋吉避凶后端已运行 http://0.0.0.0:${config_1.config.port}`);
+    if ((0, aiService_1.hasApiKey)()) {
+        console.log(`[AI] ${config_1.config.aiProvider} 模式`);
     }
     else {
-        console.warn(`[AI] 未配置 ${config.aiProvider === 'gemini' ? 'GEMINI_API_KEY' : 'DEEPSEEK_API_KEY'}，将使用本地规则模式（建议配置后体验完整功能）`);
+        console.warn(`[AI] 未配置 ${config_1.config.aiProvider === 'gemini' ? 'GEMINI_API_KEY' : 'DEEPSEEK_API_KEY'}，将使用本地规则模式（建议配置后体验完整功能）`);
     }
-    startSchedule();
+    (0, scraperService_1.startSchedule)();
     // 定时清理数据库，避免长期运行膨胀
     setInterval(() => {
         try {
-            const n = cleanupDb();
+            const n = (0, store_1.cleanupDb)();
             if (n)
                 console.log(`[清理] 定时清理 ${n} 条过期/超量数据`);
         }
@@ -90,14 +99,14 @@ async function shutdown(signal) {
     shuttingDown = true;
     console.log(`[关闭] 收到 ${signal}，正在优雅退出…`);
     try {
-        stopSchedule();
+        (0, scraperService_1.stopSchedule)();
         await app.close();
     }
     catch (e) {
         console.error('[关闭] HTTP 关闭异常:', e);
     }
     try {
-        db.close();
+        store_1.db.close();
     }
     catch (e) {
         console.error('[关闭] 数据库关闭异常:', e);

@@ -2,7 +2,7 @@
   "name": "qjbx-backend",
   "version": "0.1.0",
   "description": "趋吉避凶 - 港台风水择日APP后端",
-  "type": "module",
+  "type": "commonjs",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",

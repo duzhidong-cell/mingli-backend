@@ -1,14 +1,22 @@
-import { CheerioCrawler, ProxyConfiguration, Configuration, } from 'crawlee';
-import { rmSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
-import sources from '../data/sources.json';
-import { getArticleCount, upsertArticle } from './store';
-import { config } from '../config';
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.runScrapeOnce = runScrapeOnce;
+exports.startSchedule = startSchedule;
+exports.stopSchedule = stopSchedule;
+const crawlee_1 = require("crawlee");
+const node_fs_1 = require("node:fs");
+const node_path_1 = require("node:path");
+const sources_json_1 = __importDefault(require("../data/sources.json"));
+const store_1 = require("./store");
+const config_1 = require("../config");
 // 清理 crawlee 的持久化目录（本项目不做断点续爬，storage/ 只是垃圾）
-const crawleeStorage = join(process.cwd(), 'storage');
-if (existsSync(crawleeStorage)) {
+const crawleeStorage = (0, node_path_1.join)(process.cwd(), 'storage');
+if ((0, node_fs_1.existsSync)(crawleeStorage)) {
     try {
-        rmSync(crawleeStorage, { recursive: true, force: true });
+        (0, node_fs_1.rmSync)(crawleeStorage, { recursive: true, force: true });
         console.log('[抓取] 已清理 crawlee 残留目录 storage/');
     }
     catch (e) {
@@ -16,8 +24,8 @@ if (existsSync(crawleeStorage)) {
     }
 }
 // 关闭 crawlee 磁盘持久化，避免每次抓取重新生成 storage/
-Configuration.getGlobalConfig().set('persistStorage', false);
-const KEYWORDS = sources.keywords;
+crawlee_1.Configuration.getGlobalConfig().set('persistStorage', false);
+const KEYWORDS = sources_json_1.default.keywords;
 function hasKeyword(text) {
     const t = text || '';
     for (const k of KEYWORDS) {
@@ -70,14 +78,14 @@ function extractArticle($) {
 }
 async function runSource(source) {
     let added = 0;
-    const crawler = new CheerioCrawler({
+    const crawler = new crawlee_1.CheerioCrawler({
         maxConcurrency: 3,
         maxRequestsPerCrawl: 120,
         maxRequestRetries: 1,
         retryOnBlocked: true,
         requestHandlerTimeoutSecs: 30,
-        proxyConfiguration: config.proxyUrl
-            ? new ProxyConfiguration({ proxyUrls: [config.proxyUrl] })
+        proxyConfiguration: config_1.config.proxyUrl
+            ? new crawlee_1.ProxyConfiguration({ proxyUrls: [config_1.config.proxyUrl] })
             : undefined,
         async requestHandler(ctx) {
             const { request, $ } = ctx;
@@ -119,7 +127,7 @@ async function runSource(source) {
                         keywords: [linkHit || 'general'],
                         publishedAt,
                     };
-                    upsertArticle(art);
+                    (0, store_1.upsertArticle)(art);
                     added++;
                 }
             }
@@ -140,13 +148,13 @@ const FAIL_LIMIT = 3;
 const FAIL_COOLDOWN_MS = 30 * 60 * 1000;
 const failCount = new Map();
 const skipUntil = new Map();
-export async function runScrapeOnce() {
+async function runScrapeOnce() {
     if (running)
-        return { added: 0, total: getArticleCount() }; // 已有抓取在跑，直接跳过避免并发
+        return { added: 0, total: (0, store_1.getArticleCount)() }; // 已有抓取在跑，直接跳过避免并发
     running = true;
     try {
         const now = Date.now();
-        const results = await Promise.allSettled(sources.sources
+        const results = await Promise.allSettled(sources_json_1.default.sources
             .filter(s => s.enabled)
             .map(async (source) => {
             const until = skipUntil.get(source.name) || 0;
@@ -175,7 +183,7 @@ export async function runScrapeOnce() {
             if (res.status === 'fulfilled')
                 added += res.value.added;
         }
-        return { added, total: getArticleCount() };
+        return { added, total: (0, store_1.getArticleCount)() };
     }
     finally {
         running = false;
@@ -184,8 +192,8 @@ export async function runScrapeOnce() {
 /** 启动定时抓取 */
 let scheduleTimer = null;
 let bootTimer = null;
-export function startSchedule() {
-    if (!config.scrapeEnabled)
+function startSchedule() {
+    if (!config_1.config.scrapeEnabled)
         return;
     const run = async () => {
         try {
@@ -196,11 +204,11 @@ export function startSchedule() {
             console.error('[抓取] 定时任务异常:', e.message);
         }
     };
-    scheduleTimer = setInterval(run, config.scrapeIntervalMin * 60 * 1000);
+    scheduleTimer = setInterval(run, config_1.config.scrapeIntervalMin * 60 * 1000);
     bootTimer = setTimeout(run, 3000);
 }
 /** 停止定时抓取（优雅关闭时调用） */
-export function stopSchedule() {
+function stopSchedule() {
     if (scheduleTimer)
         clearInterval(scheduleTimer);
     if (bootTimer)
