@@ -1,0 +1,51 @@
+{
+  "keywords": [
+    "運程", "運勢", "风水", "風水", "生肖", "犯太歲", "犯太岁", "流年",
+    "開運", "开运", "方位", "宜忌", "吉凶", "大運", "桃花", "财位", "財位",
+    "五黄", "五黃", "二黑", "九宮飛星", "九宫飞星", "立春", "吉日", "择日"
+  ],
+  "sources": [
+    {
+      "name": "星岛头条",
+      "site": "stheadline",
+      "base": "https://www.stheadline.com/zh-hans/lifetips",
+      "startUrls": [
+        "https://www.stheadline.com/zh-hans/lifetips"
+      ],
+      "summary": "星岛日报旗下玄学风水专栏，麦玲玲/苏民峰等大师运程文章",
+      "enabled": true
+    },
+    {
+      "name": "香港01",
+      "site": "hk01",
+      "base": "https://www.hk01.com",
+      "startUrls": [
+        "https://www.hk01.com/channel/%E7%8E%84%E5%AD%A6",
+        "https://www.hk01.com/tag/33218"
+      ],
+      "summary": "香港01玄学频道，麦玲玲/苏民峰马年运程系列",
+      "enabled": true
+    },
+    {
+      "name": "东网繽FUN星网",
+      "site": "oncc",
+      "base": "https://hk.on.cc",
+      "startUrls": [
+        "https://hk.on.cc/hk/bkn/cnt/entertainment/index.html"
+      ],
+      "summary": "东方日报旗下娱乐星相栏目，玄学家生肖运程",
+      "enabled": true
+    },
+    {
+      "name": "Yahoo香港新闻",
+      "site": "yahoo",
+      "base": "https://hk.news.yahoo.com/search",
+      "startUrls": [
+        "https://hk.news.yahoo.com/search?p=2026%E9%A6%AC%E5%B9%B4%E9%A3%A8%E6%B0%B4",
+        "https://hk.news.yahoo.com/search?p=%E8%98%87%E6%B0%91%E5%B3%B0%20%E6%B5%81%E5%B9%B4"
+      ],
+      "summary": "Yahoo聚合各媒体玄学文章(含流年方位攻略)",
+      "enabled": true
+    }
+  ]
+}

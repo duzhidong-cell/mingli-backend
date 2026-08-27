@@ -1,5 +1,10 @@
 node_modules/
-data/
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.log
+data/full-test.json
+data/qjbx.db
 scraped/
 .env
 *.log
