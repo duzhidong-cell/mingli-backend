@@ -1,0 +1,14 @@
+mingli.teutesiss.com {
+	reverse_proxy backend:8787
+
+	# 压缩响应（移动端省流量）
+	encode zstd gzip
+
+	# 安全头
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
