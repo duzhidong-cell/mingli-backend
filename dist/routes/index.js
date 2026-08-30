@@ -5,6 +5,8 @@ const node_crypto_1 = require("node:crypto");
 const lunar_typescript_1 = require("lunar-typescript");
 const baziService_1 = require("../services/baziService");
 const eventService_1 = require("../services/eventService");
+const luckyService_1 = require("../services/luckyService");
+const customRegions_1 = require("../data/customRegions");
 const aiService_1 = require("../services/aiService");
 const store_1 = require("../services/store");
 const purchaseService_1 = require("../services/purchaseService");
@@ -137,10 +139,18 @@ async function registerRoutes(app) {
         const date = req.body.date ?? (0, baziService_1.hkToday)();
         if (!validDateStr(date))
             return reply.code(400).send({ error: 'date 应为 YYYY-MM-DD 内的有效日期' });
+        const region = (0, customRegions_1.isRegion)(req.body?.region) ? req.body.region : 'hk';
         const key = `daily:${date}:${birthKey(birth)}`;
         const cached = (0, store_1.cacheGet)(key, 24 * 60 * 60 * 1000); // 每日宜忌缓存 1 天，次日自动重算
-        if (cached)
+        if (cached) {
+            // 台湾不展示香港大师署名
+            if (region === 'tw' && cached && typeof cached === 'object') {
+                const c = cached;
+                if (Array.isArray(c.sources))
+                    c.sources = [];
+            }
             return cached;
+        }
         const [range, bazi, almanac] = await Promise.all([
             (0, store_1.getArticles)(30),
             (async () => {
@@ -156,6 +166,8 @@ async function registerRoutes(app) {
         const articles = (0, store_1.searchArticles)('运程').concat((0, store_1.searchArticles)('风水')).concat(range)
             .filter((a, i, arr) => arr.findIndex(x => x.url === a.url) === i).slice(0, 8);
         const advice = await (0, aiService_1.generateDailyAdvice)({ date, almanac, bazi, articles });
+        if (region === 'tw')
+            advice.sources = [];
         // 仅缓存 AI 模式结果；本地兜底结果不缓存（下一次 AI 恢复后自动换回 AI）
         if (advice.mode === 'ai')
             (0, store_1.cacheSet)(key, advice, 24 * 60 * 60 * 1000);
@@ -186,6 +198,7 @@ async function registerRoutes(app) {
         if (!Number.isInteger(year) || year < 1900 || year > 2100) {
             return reply.code(400).send({ error: 'year 超出支持范围' });
         }
+        const region = (0, customRegions_1.isRegion)(req.body?.region) ? req.body.region : 'hk';
         let bazi;
         try {
             bazi = (0, baziService_1.computeBaZi)(birth);
@@ -196,12 +209,21 @@ async function registerRoutes(app) {
         const zodiac = bazi.shengXiao;
         const key = `annual:${year}:${zodiac}:${birthKey(birth)}`;
         const cached = (0, store_1.cacheGet)(key, 30 * 24 * 60 * 60 * 1000); // 流年建议缓存 30 天
-        if (cached)
+        if (cached) {
+            // 台湾不展示香港大师署名
+            if (region === 'tw' && cached && typeof cached === 'object') {
+                const c = cached;
+                if (Array.isArray(c.masterSources))
+                    c.masterSources = [];
+            }
             return cached;
+        }
         const articles = (0, store_1.getArticles)(50)
             .filter(a => /运程|流年|方位|风水|犯太/.test(String((0, zhTradition_1.tw)(a.title))) || (a.keywords || []).some(k => /运程|流年|方位|风水|犯太/.test(String((0, zhTradition_1.tw)(k)))))
             .slice(0, 8);
         const advice = await (0, aiService_1.generateAnnualAdvice)({ year, zodiac, bazi, articles });
+        if (region === 'tw')
+            advice.masterSources = [];
         // 仅缓存 AI 模式结果；本地兜底结果不缓存（下一次 AI 恢复后自动换回 AI）
         if (advice.mode === 'ai')
             (0, store_1.cacheSet)(key, advice, 30 * 24 * 60 * 60 * 1000);
@@ -275,6 +297,7 @@ async function registerRoutes(app) {
         const b = req.body?.birth;
         const eventType = String(req.body?.eventType || '');
         const date = String(req.body?.date || '');
+        const region = (0, customRegions_1.isRegion)(req.body?.region) ? req.body.region : 'hk';
         if (!b || !validBirth(b))
             return reply.code(400).send({ error: '参数不完整：需要 birth 信息' });
         // 前端拿到的是繁体（如「動土」），服务端字典是简体（如「动土」），双向都匹配
@@ -288,12 +311,47 @@ async function registerRoutes(app) {
         if (!birth)
             return reply.code(400).send({ error: '出生日期或时间不合法' });
         try {
-            return (0, eventService_1.generateEventAdvice)({ birth, eventType: et.type, date });
+            return (0, eventService_1.generateEventAdvice)({ birth, eventType: et.type, date, region });
         }
         catch (e) {
             reply.log.error({ err: e }, '事项择吉计算异常');
             return reply.code(400).send({ error: '该日期无法解析，请更换日期' });
         }
+    });
+    // 每日开运关键词（本地规则，无 AI）：五行/天干/地支/方位/时辰/色彩 意象，不含任何数字
+    app.post('/api/lucky/daily', {
+        config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+    }, async (req, reply) => {
+        const b = req.body?.birth;
+        if (!validBirth(b))
+            return reply.code(400).send({ error: '参数不完整：需要 birth{year,month,day,hour,gender,isLunar}' });
+        const birth = sanitizeBirth(b);
+        if (!birth)
+            return reply.code(400).send({ error: '出生日期或时间不合法' });
+        const date = req.body.date ?? (0, baziService_1.hkToday)();
+        if (!validDateStr(date))
+            return reply.code(400).send({ error: 'date 应为 YYYY-MM-DD 内的有效日期' });
+        const region = (0, customRegions_1.isRegion)(req.body?.region) ? req.body.region : 'hk';
+        const key = `lucky:${date}:${region}:${birthKey(birth)}`;
+        const cached = (0, store_1.cacheGet)(key, 24 * 60 * 60 * 1000); // 每日关键词缓存 1 天
+        if (cached)
+            return cached;
+        let result;
+        try {
+            result = (0, luckyService_1.generateDailyLucky)({ birth, date, region });
+        }
+        catch (e) {
+            reply.log.error({ err: e }, '开运关键词生成异常');
+            return reply.code(400).send({ error: '该出生日期无法解析，请检查输入' });
+        }
+        (0, store_1.cacheSet)(key, result, 24 * 60 * 60 * 1000);
+        return result;
+    });
+    // 地区礼俗速查（送礼忌讳/佳礼；按谐音语系返回，前端「速查卡」用）
+    app.get('/api/region/gifts', async (req, reply) => {
+        const region = (0, customRegions_1.isRegion)(req.query.region) ? req.query.region : 'hk';
+        const g = customRegions_1.REGION_GIFTS[region];
+        return { region, label: customRegions_1.REGION_LABELS[region], langNote: g.langNote, taboos: g.taboos, tips: g.tips };
     });
     // 订阅校验：客户端购买后上报 purchaseToken，服务端调 Google Play API 验证并落库
     app.post('/api/purchase/verify', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {

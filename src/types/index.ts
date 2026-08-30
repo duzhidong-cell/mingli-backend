@@ -1,3 +1,34 @@
+/** 用户地区：影响谐音语系与礼俗（hk=粤语广府，tw=国语/闽南） */
+export type Region = 'hk' | 'tw';
+
+/** 每日开运关键词卡（六合彩不适用：只出意象关键词，无任何具体号码） */
+export interface LuckyCard {
+  /** 五行 / 天干 / 地支 / 方位 / 时辰 / 色彩 */
+  type: string;
+  /** 卡名称，如 五行牌 */
+  title: string;
+  /** 大字牌面（如「木」「甲」「子」「南」「午时」「青」） */
+  glyph: string;
+  /** 关键词（开运意象词） */
+  keyword: string;
+  /** 释义（2-3 句） */
+  interpretation: string;
+  /** 开运提示（行动建议） */
+  hint: string;
+}
+
+export interface DailyLuckyResult {
+  date: string;
+  region: Region;
+  birthSummary: string;
+  cards: LuckyCard[];
+  /** 今日开运锦囊（一句话） */
+  tip: string;
+  /** 命理古籍出处（书名列表） */
+  ancientSources: string[];
+  disclaimer: string;
+}
+
 export interface BirthInput {
   year: number;
   month: number;

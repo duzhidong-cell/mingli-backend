@@ -1,5 +1,6 @@
 import { getAlmanac, getHourPillars, computeBaZi, toDateStr } from './baziService';
-import type { BirthInput, EventAdviceResult, LuckyHour } from '../types';
+import { REGION_GIFTS } from '../data/customRegions';
+import type { BirthInput, EventAdviceResult, LuckyHour, Region } from '../types';
 
 /** 生肖 → 地支 */
 const ZODIAC_ZHI: Record<string, string> = {
@@ -28,30 +29,6 @@ export const EVENT_TYPES: { type: string; icon: string; keywords: string[]; gift
   { type: '安葬', icon: '🕯', keywords: ['安葬', '破土', '入殓', '立碑'], gift: false },
 ];
 
-const GIFT_TABOOS: string[] = [
-  '钟表：谐音「送终」，忌作婚庆/寿礼（自用可）。',
-  '伞：谐音「散」，忌送情侣/亲友远行。',
-  '梨：谐音「离」，忌送夫妻、情侣。',
-  '鞋：谐音「邪」，婚嫁场合尤忌。',
-  '扇子：谐音「散」，且为「见风使舵」之象。',
-  '镜子：谐音「敬」转「忌」，有映照离散之嫌。',
-  '刀剪利器：喻「一刀两断」，忌送关系亲近者。',
-  '绿色帽子：谐「绿帽」，任何场合都忌。',
-  '白色/黑色大件：喜庆场合忌（丧礼另论）。',
-  '药品补品：健康大忌，尤其喜庆场合。',
-];
-
-const GIFT_TIPS: Record<string, string[]> = {
-  婚礼: ['红包最稳当', '金饰/龙凤呈祥摆件', '红枣、花生、桂圆、莲子（早生贵子）', '一对囍字烛台'],
-  庆生: ['红包', '蛋糕（谐音「高」）', '有寿桃元素的点心'],
-  搬迁: ['入伙利是（红包）', '米、油（丰衣足食）', '富贵竹/金钱树（生财）'],
-  高升: ['节节高（富贵竹/竹摆件）', '招财貔貅/金蟾摆件', '红酒（久久）'],
-  开业: ['花篮/发财树', '金元宝摆件', '开业利是'],
-  满月: ['长命锁/平安符', '红包', '衣物（忌白色）'],
-};
-
-const FALLBACK_TIPS: string[] = ['红包（最稳妥，主家满意）', '应景礼盒+贺卡（写上吉祥话）', '绿植盆栽（招财、生机）'];
-
 /** 给出某日某时辰对用户是否为吉时（本地规则） */
 function scoreHour(h: { ganzhi: string; element: string; range: string }, user: {
   shengXiaoZhi: string; favorable: string[]; unfavorable: string[]; dayMaster: string;
@@ -70,7 +47,8 @@ function scoreHour(h: { ganzhi: string; element: string; range: string }, user: 
 }
 
 /** 事项择吉：结合当日黄历 + 用户八字喜忌 + 冲煞，给出吉凶判断与化解建议 */
-export function generateEventAdvice(input: { birth: BirthInput; eventType: string; date: string }): EventAdviceResult {
+export function generateEventAdvice(input: { birth: BirthInput; eventType: string; date: string; region?: Region }): EventAdviceResult {
+  const region = input.region === 'tw' ? 'tw' : 'hk';
   const et = EVENT_TYPES.find(e => e.type === input.eventType) || EVENT_TYPES[0];
   const almanac = getAlmanac(input.date);
   const bazi = computeBaZi(input.birth);
@@ -137,9 +115,10 @@ export function generateEventAdvice(input: { birth: BirthInput; eventType: strin
   if (almanac.position.xi) resolve.push(`面向${almanac.position.xi}（喜神）方位进行，更添喜气。`);
   if (almanac.pengZuGan) resolve.push(`注意彭祖百忌：「${almanac.pengZuGan}」，办此类事避开即可。`);
 
-  // 6) 送礼忌讳与佳礼
-  const giftTaboos = et.gift ? GIFT_TABOOS : [];
-  const perTips = GIFT_TIPS[et.type] || FALLBACK_TIPS;
+  // 6) 送礼忌讳与佳礼（按地区谐音语系取表）
+  const gifts = REGION_GIFTS[region];
+  const giftTaboos = et.gift ? gifts.taboos : [];
+  const perTips = gifts.tips[et.type] || gifts.fallbackTips;
   const giftTips: string[] = [...perTips];
   if (bazi.favorable.length) giftTips.push(`礼物颜色宜带「${bazi.favorable.join('、')}」属相（您的喜用色），更显用心。`);
   if (bazi.unfavorable.length) giftTips.push(`礼物颜色宜避开「${bazi.unfavorable.join('、')}」属相（您的忌神色）。`);
