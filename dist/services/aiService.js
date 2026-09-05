@@ -6,6 +6,7 @@ exports.generateDailyAdvice = generateDailyAdvice;
 exports.generateAnnualAdvice = generateAnnualAdvice;
 exports.hasApiKey = hasApiKey;
 exports.availableProviders = availableProviders;
+exports.enhanceDailyLucky = enhanceDailyLucky;
 const genai_1 = require("@google/genai");
 const config_1 = require("../config");
 const ancientService_1 = require("./ancientService");
@@ -448,5 +449,93 @@ function hasApiKey() {
 /** 当前配置且带 Key 的提供商（主备顺序） */
 function availableProviders() {
     return providerOrder();
+}
+/**
+ * 每日开运六牌·AI 解读增强。
+ * 用通俗语言解释每张牌（如「旺木」= 今天对你有利的五行是木），并依传统河图洛书五行数理
+ * 给出「点到即止」的彩讯数字意象提示（不直接报具体投注号码）：
+ *   水1/6 · 火2/7 · 木3/8 · 金4/9 · 土5/10，
+ * 天干地支再给天然序数（甲乙丙丁…1~10 / 子丑寅卯…1~12）作隐含参照。
+ * AI 不可用时原样返回本地结果，不中断流程。
+ */
+async function enhanceDailyLucky(args) {
+    const { result, bazi, almanac, articles, region } = args;
+    const userLocal = result.cards.map((c, i) => `${i + 1}.【${c.title}】牌面「${c.glyph}」·关键词「${c.keyword}」\n   释义：${c.interpretation}\n   提示：${c.hint}`).join('\n');
+    const systemPrompt = `你是香港著名命理师与六合彩分析师的AI助理，专精「开运关键词」解说。
+请用通俗的话替普通人解读每日开运六牌，并给出彩讯数字意象的暗示。
+铁律：
+1. 每张牌都要先「用人话解释牌面含义」——例如「旺木」就是：今天对你最有利的五行是木，代表生发、向上，做与木相关的事易得福。
+2. 给出数字意象提示时，只做「暗示」不要直接报出投注号码或具体下单（如说「木行主旺，开运数可多向三、八之象靠拢」），点到即止。
+3. 五行天然数理：水1/6、火2/7、木3/8、金4/9、土5/10；天干天干序数甲1乙2...癸10，地支序数子1丑2...亥12，可作隐含参照。不要编造玄色理论。
+4. 全部使用繁體中文输出，只输出JSON，不要多余文字。`;
+    const userPrompt = `【用户命盘】${dayMasterSummary(bazi)}；八字：${bazi.shortDesc}；地区：${region === 'tw' ? '台湾' : '香港'}
+【今日 ${result.date}】农历${almanac.lunarDate}；日柱：${almanac.ganzhiDay}；财神方位${almanac.position.cai}；喜神方位${almanac.position.xi}
+【今日开运六牌（本地规则生成）】
+${userLocal}
+【近期大师文章参考（可选观点）】
+${articles.map(a => `-(${a.source})${a.title}：${a.summary.slice(0, 100)}`).join('\n') || '(暂无)'}
+
+请输出JSON：{
+  "luckyKeyword":"一句话的开运关键词标语(10字内)，用作今日最醒目的大标题，例如『木·开运上行』",
+  "cards":[
+    {"index":1,"plain":"用人话解释这张牌对这位用户意味着什么(40-80字)","numHint":"彩讯数字意象暗示(30字内，点到即止，勿报具体号码)"},
+    ... 与上面6张牌一一对应，共6条 ...
+  ],
+  "tip":"今日开运锦囊(50字内，可含一句彩讯意象暗示)"
+}`;
+    const schema = {
+        type: genai_1.Type.OBJECT,
+        properties: {
+            luckyKeyword: { type: genai_1.Type.STRING },
+            cards: {
+                type: genai_1.Type.ARRAY,
+                items: {
+                    type: genai_1.Type.OBJECT,
+                    properties: {
+                        index: { type: genai_1.Type.NUMBER },
+                        plain: { type: genai_1.Type.STRING },
+                        numHint: { type: genai_1.Type.STRING },
+                    },
+                    required: ['index', 'plain', 'numHint'],
+                },
+            },
+            tip: { type: genai_1.Type.STRING },
+        },
+        required: ['luckyKeyword', 'cards', 'tip'],
+    };
+    const context = articles.map(a => a.url).filter(Boolean);
+    const ai = await callAi(systemPrompt, userPrompt, schema, context);
+    const d = ai.data;
+    if (!d)
+        return result; // AI 不可用 → 原样本地结果
+    const luckyKeyword = String(d.luckyKeyword || result.tip || '');
+    const notes = {};
+    if (Array.isArray(d.cards)) {
+        for (const item of d.cards) {
+            const o = item;
+            const i = Number(o.index);
+            notes[i] = { plain: String(o.plain || ''), numHint: String(o.numHint || '') };
+        }
+    }
+    // 合并回卡片：有 AI 内容则覆盖，否则保留本地
+    const cards = result.cards.map((c, i) => {
+        const n = notes[i + 1] || notes[i] || {};
+        const plain = n.plain ? n.plain : c.interpretation;
+        const numHint = n.numHint ? n.numHint : c.hint;
+        return {
+            ...c,
+            interpretation: plain,
+            hint: numHint,
+        };
+    });
+    const aiTip = String(d.tip || '');
+    return {
+        ...result,
+        luckyKeyword: luckyKeyword || result.tip,
+        cards,
+        tip: aiTip || result.tip,
+        aiProvider: ai.provider || 'local',
+        mode: ai.provider ? 'ai' : 'local',
+    };
 }
 //# sourceMappingURL=aiService.js.map

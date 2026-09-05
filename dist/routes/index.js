@@ -318,7 +318,7 @@ async function registerRoutes(app) {
             return reply.code(400).send({ error: '该日期无法解析，请更换日期' });
         }
     });
-    // 每日开运关键词（本地规则，无 AI）：五行/天干/地支/方位/时辰/色彩 意象，不含任何数字
+    // 每日开运关键词（本地规则 + AI 解读增强）：五行/天干/地支/方位/时辰/色彩 意象 + 彩讯数字意象
     app.post('/api/lucky/daily', {
         config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     }, async (req, reply) => {
@@ -344,7 +344,25 @@ async function registerRoutes(app) {
             reply.log.error({ err: e }, '开运关键词生成异常');
             return reply.code(400).send({ error: '该出生日期无法解析，请检查输入' });
         }
-        (0, store_1.cacheSet)(key, result, 24 * 60 * 60 * 1000);
+        // AI 解读增强：AI 可用时用 AI 重写牌面释义与彩讯暗示；失败则保留本地结果
+        if ((0, aiService_1.hasApiKey)()) {
+            try {
+                const [range, bazi, almanac] = await Promise.all([
+                    (0, store_1.getArticles)(20),
+                    Promise.resolve((0, baziService_1.computeBaZi)(birth)),
+                    Promise.resolve((0, baziService_1.getAlmanac)(date)),
+                ]);
+                const articles = (0, store_1.searchArticles)('运程').concat((0, store_1.searchArticles)('风水')).concat(range)
+                    .filter((a, i, arr) => arr.findIndex(x => x.url === a.url) === i).slice(0, 5);
+                result = await (0, aiService_1.enhanceDailyLucky)({ result, bazi, almanac, articles, region });
+            }
+            catch (e) {
+                reply.log.error({ err: e }, '开运六牌 AI 解读失败，使用本地结果');
+            }
+        }
+        // 仅缓存 AI 增强结果；纯本地结果不缓存（AI 恢复后自动换回）
+        if (result.mode === 'ai')
+            (0, store_1.cacheSet)(key, result, 24 * 60 * 60 * 1000);
         return result;
     });
     // 地区礼俗速查（送礼忌讳/佳礼；按谐音语系返回，前端「速查卡」用）
