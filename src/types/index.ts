@@ -1,4 +1,4 @@
-/** 用户地区：影响谐音语系与礼俗（hk=粤语广府，tw=国语/闽南） */
+/** 用户地区：影响谐音语系与礼俗（hk=广府谐音，tw=国语/闽南） */
 export type Region = 'hk' | 'tw';
 
 /** 每日开运关键词卡（六合彩不适用：只出意象关键词，无任何具体号码） */
@@ -24,9 +24,15 @@ export interface DailyLuckyResult {
   cards: LuckyCard[];
   /** 今日开运锦囊（一句话） */
   tip: string;
+  /** AI 增强后的醒目开运关键词大标题（如「旺木·开运上行」） */
+  luckyKeyword?: string;
   /** 命理古籍出处（书名列表） */
   ancientSources: string[];
   disclaimer: string;
+  /** ai = AI 增强过；local = 纯本地规则 */
+  mode?: 'ai' | 'local';
+  /** 实际使用的 AI 提供商（deepseek/gemini/openai），local 时空串 */
+  aiProvider?: string;
 }
 
 export interface BirthInput {

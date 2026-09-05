@@ -6,7 +6,7 @@ import { computeBaZi, getAlmanac, hkToday, hkYear, hkNow, getCalendarMonth } fro
 import { generateEventAdvice, EVENT_TYPES } from '../services/eventService';
 import { generateDailyLucky } from '../services/luckyService';
 import { isRegion, REGION_GIFTS, REGION_LABELS } from '../data/customRegions';
-import { generateDailyAdvice, generateAnnualAdvice, hasApiKey, availableProviders, FALLBACK_YEAR } from '../services/aiService';
+import { generateDailyAdvice, generateAnnualAdvice, enhanceDailyLucky, hasApiKey, availableProviders, FALLBACK_YEAR } from '../services/aiService';
 import { getArticles, searchArticles, cacheGet, cacheSet, upsertSubscription, getSubscription } from '../services/store';
 import { verifyGoogleSubscription, hasServiceAccount, ALLOWED_PRODUCT_IDS } from '../services/purchaseService';
 import { runScrapeOnce } from '../services/scraperService';
@@ -300,7 +300,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  // 每日开运关键词（本地规则，无 AI）：五行/天干/地支/方位/时辰/色彩 意象，不含任何数字
+  // 每日开运关键词（本地规则 + AI 解读增强）：五行/天干/地支/方位/时辰/色彩 意象 + 彩讯数字意象
   app.post<{ Body: { birth: BirthInput; date?: string; region?: string } }>('/api/lucky/daily', {
     config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
   }, async (req, reply) => {
@@ -321,7 +321,23 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       reply.log.error({ err: e }, '开运关键词生成异常');
       return reply.code(400).send({ error: '该出生日期无法解析，请检查输入' });
     }
-    cacheSet(key, result, 24 * 60 * 60 * 1000);
+    // AI 解读增强：AI 可用时用 AI 重写牌面释义与彩讯暗示；失败则保留本地结果
+    if (hasApiKey()) {
+      try {
+        const [range, bazi, almanac] = await Promise.all([
+          getArticles(20),
+          Promise.resolve(computeBaZi(birth)),
+          Promise.resolve(getAlmanac(date)),
+        ]);
+        const articles = searchArticles('运程').concat(searchArticles('风水')).concat(range)
+          .filter((a, i, arr) => arr.findIndex(x => x.url === a.url) === i).slice(0, 5);
+        result = await enhanceDailyLucky({ result, bazi, almanac, articles, region });
+      } catch (e) {
+        reply.log.error({ err: e }, '开运六牌 AI 解读失败，使用本地结果');
+      }
+    }
+    // 仅缓存 AI 增强结果；纯本地结果不缓存（AI 恢复后自动换回）
+    if (result.mode === 'ai') cacheSet(key, result, 24 * 60 * 60 * 1000);
     return result;
   });
 
