@@ -268,8 +268,12 @@ export async function generateDailyAdvice(args: {
   almanac: AlmanacResult;
   bazi: BaZiResult;
   articles: Article[];
+  /** 订阅门禁：true 时跳过 AI，强制返回本地规则结果 */
+  forceLocal?: boolean;
 }): Promise<DailyAdvice> {
   const { date, almanac, bazi, articles } = args;
+
+  if (args.forceLocal) return localDailyAdvice({ date, almanac, bazi, articles });
 
   const systemPrompt = `你是香港著名玄学家的AI助理，擅长八字与黄历择日。根据用户的出生八字命盘、当日黄历(通胜)、近期风水文章与命理古籍，给出「今日适合做/不宜做」的个性化建议。
 规则：
@@ -386,9 +390,15 @@ export async function generateAnnualAdvice(args: {
   zodiac: string;
   bazi: BaZiResult;
   articles: Article[];
+  /** 订阅门禁：true 时跳过 AI，强制返回本地规则结果 */
+  forceLocal?: boolean;
 }): Promise<AnnualAdvice> {
   const { year, zodiac, bazi, articles } = args;
   const zodiacInfo = FALLBACK_ZODIAC[zodiac] || genericZodiac(zodiac);
+
+  if (args.forceLocal) {
+    return localAnnualAdvice({ year, zodiac, bazi, zodiacInfo, masters: masterNamesFromArticles(articles) });
+  }
 
   const systemPrompt = `你是香港著名风水大师的AI助理，专注流年方位与出行择吉。
 你拥有【2026丙午马年九宫飞星方位】资料与【本命生肖流年运程】资料，请结合用户八字五行喜忌与命理古籍依据，判断今年适合去/不适合去的地方与方位，输出JSON。全部使用繁體中文输出。`;
@@ -515,8 +525,12 @@ export async function enhanceDailyLucky(args: {
   almanac: AlmanacResult;
   articles: Article[];
   region: Region;
+  /** 订阅门禁：true 时跳过 AI，原样返回本地结果 */
+  forceLocal?: boolean;
 }): Promise<DailyLuckyResult> {
   const { result, bazi, almanac, articles, region } = args;
+
+  if (args.forceLocal) return result;
 
   const userLocal = result.cards.map((c, i) =>
     `${i + 1}.【${c.title}】牌面「${c.glyph}」·关键词「${c.keyword}」\n   释义：${c.interpretation}\n   提示：${c.hint}`,

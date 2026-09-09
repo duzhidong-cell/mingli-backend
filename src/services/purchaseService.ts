@@ -139,6 +139,11 @@ export async function verifyGoogleSubscription(productId: string, purchaseToken:
   const line = (data.lineItems || [])[0] || {};
   const expiryMs = line.expiryTime ? Date.parse(line.expiryTime) || 0 : 0;
   const status = mapState(String(data.subscriptionState || ''), expiryMs, !!line.offerDetails?.offerId);
+  // 防漏洞：Google 判定有效但未返回到期时间时，一律视为无效凭证，
+  // 避免 expiryMs=0 落库后永远判不过期。
+  if ((status === 'active' || status === 'in_trial' || status === 'grace_period') && !(expiryMs > 0)) {
+    throw Object.assign(new Error('Google 未返回有效到期时间，凭证视为无效'), { statusCode: 400 });
+  }
   return {
     productId: line.productId || productId,
     status,

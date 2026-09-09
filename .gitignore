@@ -6,5 +6,6 @@ data/*.log
 data/full-test.json
 data/qjbx.db
 scraped/
+credentials/
 .env
 *.log

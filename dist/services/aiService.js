@@ -247,6 +247,8 @@ function ancientContext(keywords, maxHits = 4) {
 /* ============ 每日宜忌 AI 建议 ============ */
 async function generateDailyAdvice(args) {
     const { date, almanac, bazi, articles } = args;
+    if (args.forceLocal)
+        return localDailyAdvice({ date, almanac, bazi, articles });
     const systemPrompt = `你是香港著名玄学家的AI助理，擅长八字与黄历择日。根据用户的出生八字命盘、当日黄历(通胜)、近期风水文章与命理古籍，给出「今日适合做/不宜做」的个性化建议。
 规则：
 1. 综合【黄历宜忌(通用)】+【用户八字五行喜忌(个性化)】+【大师文章观点(参考)】+【命理古籍依据(经典)】四者，突出针对此人的个性化。
@@ -349,6 +351,9 @@ function localDailyAdvice(args) {
 async function generateAnnualAdvice(args) {
     const { year, zodiac, bazi, articles } = args;
     const zodiacInfo = fallbackData_1.FALLBACK_ZODIAC[zodiac] || genericZodiac(zodiac);
+    if (args.forceLocal) {
+        return localAnnualAdvice({ year, zodiac, bazi, zodiacInfo, masters: masterNamesFromArticles(articles) });
+    }
     const systemPrompt = `你是香港著名风水大师的AI助理，专注流年方位与出行择吉。
 你拥有【2026丙午马年九宫飞星方位】资料与【本命生肖流年运程】资料，请结合用户八字五行喜忌与命理古籍依据，判断今年适合去/不适合去的地方与方位，输出JSON。全部使用繁體中文输出。`;
     const anKeywords = [...bazi.favorable, ...bazi.unfavorable, '流年', '大运', '十二长生', '神煞', '方位'];
@@ -460,6 +465,8 @@ function availableProviders() {
  */
 async function enhanceDailyLucky(args) {
     const { result, bazi, almanac, articles, region } = args;
+    if (args.forceLocal)
+        return result;
     const userLocal = result.cards.map((c, i) => `${i + 1}.【${c.title}】牌面「${c.glyph}」·关键词「${c.keyword}」\n   释义：${c.interpretation}\n   提示：${c.hint}`).join('\n');
     const systemPrompt = `你是香港著名命理师与六合彩分析师的AI助理，专精「开运关键词」解说。
 请用通俗的话替普通人解读每日开运六牌，并给出彩讯数字意象的暗示。

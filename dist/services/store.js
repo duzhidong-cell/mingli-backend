@@ -7,6 +7,8 @@ exports.searchArticles = searchArticles;
 exports.getArticleCount = getArticleCount;
 exports.upsertSubscription = upsertSubscription;
 exports.getSubscription = getSubscription;
+exports.getSubscriptionByToken = getSubscriptionByToken;
+exports.deleteSubscription = deleteSubscription;
 exports.cacheGet = cacheGet;
 exports.cacheSet = cacheSet;
 exports.cacheDel = cacheDel;
@@ -65,7 +67,7 @@ CREATE TABLE IF NOT EXISTS advice_cache (
 CREATE TABLE IF NOT EXISTS subscriptions (
   device_id TEXT PRIMARY KEY,
   product_id TEXT,
-  purchase_token TEXT,
+  purchase_token TEXT UNIQUE,
   status TEXT,
   expiry_ms INTEGER DEFAULT 0,
   auto_renewing INTEGER DEFAULT 0,
@@ -146,6 +148,26 @@ function getSubscription(deviceId) {
         verifiedMode: String(r.verified_mode || ''),
         updatedAt: String(r.updated_at || ''),
     };
+}
+/** 按购买凭证查订阅（防一票多开：同一 token 只能归属一个设备） */
+function getSubscriptionByToken(purchaseToken) {
+    const r = exports.db.prepare('SELECT * FROM subscriptions WHERE purchase_token = ?').get(purchaseToken);
+    if (!r)
+        return null;
+    return {
+        deviceId: String(r.device_id),
+        productId: String(r.product_id || ''),
+        purchaseToken: String(r.purchase_token || ''),
+        status: String(r.status || 'unknown'),
+        expiryMs: Number(r.expiry_ms) || 0,
+        autoRenewing: Number(r.auto_renewing) === 1,
+        verifiedMode: String(r.verified_mode || ''),
+        updatedAt: String(r.updated_at || ''),
+    };
+}
+/** 删除订阅记录（数据删除合规 / 测试清理用） */
+function deleteSubscription(deviceId) {
+    exports.db.prepare('DELETE FROM subscriptions WHERE device_id = ?').run(deviceId);
 }
 function cacheGet(key, ttlMs = DEFAULT_TTL_MS) {
     const row = exports.db.prepare('SELECT payload, created_at FROM advice_cache WHERE cache_key = ?').get(key);

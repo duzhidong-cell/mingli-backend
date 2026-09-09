@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS advice_cache (
 CREATE TABLE IF NOT EXISTS subscriptions (
   device_id TEXT PRIMARY KEY,
   product_id TEXT,
-  purchase_token TEXT,
+  purchase_token TEXT UNIQUE,
   status TEXT,
   expiry_ms INTEGER DEFAULT 0,
   auto_renewing INTEGER DEFAULT 0,
@@ -157,6 +157,28 @@ export function getSubscription(deviceId: string): SubscriptionRow | null {
     verifiedMode: String(r.verified_mode || ''),
     updatedAt: String(r.updated_at || ''),
   };
+}
+
+/** 按购买凭证查订阅（防一票多开：同一 token 只能归属一个设备） */
+export function getSubscriptionByToken(purchaseToken: string): SubscriptionRow | null {
+  const r = db.prepare('SELECT * FROM subscriptions WHERE purchase_token = ?').get(purchaseToken) as
+    Record<string, string | number | null> | undefined;
+  if (!r) return null;
+  return {
+    deviceId: String(r.device_id),
+    productId: String(r.product_id || ''),
+    purchaseToken: String(r.purchase_token || ''),
+    status: String(r.status || 'unknown'),
+    expiryMs: Number(r.expiry_ms) || 0,
+    autoRenewing: Number(r.auto_renewing) === 1,
+    verifiedMode: String(r.verified_mode || ''),
+    updatedAt: String(r.updated_at || ''),
+  };
+}
+
+/** 删除订阅记录（数据删除合规 / 测试清理用） */
+export function deleteSubscription(deviceId: string): void {
+  db.prepare('DELETE FROM subscriptions WHERE device_id = ?').run(deviceId);
 }
 
 export function cacheGet(key: string, ttlMs = DEFAULT_TTL_MS): unknown | null {

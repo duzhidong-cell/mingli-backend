@@ -7,7 +7,7 @@ import { generateEventAdvice, EVENT_TYPES } from '../services/eventService';
 import { generateDailyLucky } from '../services/luckyService';
 import { isRegion, REGION_GIFTS, REGION_LABELS } from '../data/customRegions';
 import { generateDailyAdvice, generateAnnualAdvice, enhanceDailyLucky, hasApiKey, availableProviders, FALLBACK_YEAR } from '../services/aiService';
-import { getArticles, searchArticles, cacheGet, cacheSet, upsertSubscription, getSubscription } from '../services/store';
+import { getArticles, searchArticles, cacheGet, cacheSet, upsertSubscription, getSubscription, getSubscriptionByToken } from '../services/store';
 import { verifyGoogleSubscription, hasServiceAccount, ALLOWED_PRODUCT_IDS } from '../services/purchaseService';
 import { runScrapeOnce } from '../services/scraperService';
 import { ancientLib } from '../services/ancientService';
@@ -72,6 +72,15 @@ function aiModeName(): string {
   return providers.join(' → ');
 }
 
+/** 是否拥有有效订阅（active / in_trial / grace_period 且未过期） */
+function isEntitled(deviceId: string): boolean {
+  if (!deviceId || deviceId.length < 8 || deviceId.length > 64) return false;
+  const sub = getSubscription(deviceId);
+  if (!sub) return false;
+  if (sub.expiryMs > 0 && sub.expiryMs < Date.now()) return false;
+  return sub.status === 'active' || sub.status === 'in_trial' || sub.status === 'grace_period';
+}
+
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // 所有响应统一转繁体输出
   app.addHook('onSend', async (_req, reply, payload) => {
@@ -118,8 +127,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  // 今日个性化宜忌（八字+黄历+大师文章 → AI）
-  app.post<{ Body: { birth: BirthInput; date?: string; region?: string } }>('/api/daily/advice', {
+  // 今日个性化宜忌（八字+黄历+大师文章 → AI；无订阅回退本地规则）
+  app.post<{ Body: { birth: BirthInput; date?: string; region?: string; deviceId?: string } }>('/api/daily/advice', {
     config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
   }, async (req, reply) => {
     const b = req.body?.birth;
@@ -129,7 +138,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const date = req.body.date ?? hkToday();
     if (!validDateStr(date)) return reply.code(400).send({ error: 'date 应为 YYYY-MM-DD 内的有效日期' });
     const region = isRegion(req.body?.region) ? req.body.region : 'hk';
-    const key = `daily:${date}:${birthKey(birth)}`;
+    const entitled = isEntitled(String(req.body?.deviceId || ''));
+    // 缓存 key 区分订阅状态，避免未订阅用户命中已订阅用户的 AI 缓存
+    const key = `daily:${date}:${entitled ? 's' : 'n'}:${birthKey(birth)}`;
     const cached = cacheGet(key, 24 * 60 * 60 * 1000); // 每日宜忌缓存 1 天，次日自动重算
     if (cached) {
       // 台湾不展示香港大师署名
@@ -153,7 +164,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     ]);
     const articles = searchArticles('运程').concat(searchArticles('风水')).concat(range)
       .filter((a, i, arr) => arr.findIndex(x => x.url === a.url) === i).slice(0, 8);
-    const advice = await generateDailyAdvice({ date, almanac, bazi, articles });
+    const advice = await generateDailyAdvice({ date, almanac, bazi, articles, forceLocal: !entitled });
     if (region === 'tw') advice.sources = [];
 
     // 仅缓存 AI 模式结果；本地兜底结果不缓存（下一次 AI 恢复后自动换回 AI）
@@ -171,8 +182,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return { year, note: '请指定 zodiac 参数（鼠牛虎兔龙蛇马羊猴鸡狗猪 之一）' };
   });
 
-  // 流年方位 + 出行建议（八字+大师方位数据 → AI）
-  app.post<{ Body: { birth: BirthInput; year?: number; region?: string } }>('/api/annual/advice', {
+  // 流年方位 + 出行建议（八字+大师方位数据 → AI；无订阅回退本地规则）
+  app.post<{ Body: { birth: BirthInput; year?: number; region?: string; deviceId?: string } }>('/api/annual/advice', {
     config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
   }, async (req, reply) => {
     const b = req.body?.birth;
@@ -191,7 +202,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: '无法解析该出生日期（可能农历日期不存在）' });
     }
     const zodiac = bazi.shengXiao;
-    const key = `annual:${year}:${zodiac}:${birthKey(birth)}`;
+    const entitled = isEntitled(String(req.body?.deviceId || ''));
+    const key = `annual:${year}:${zodiac}:${entitled ? 's' : 'n'}:${birthKey(birth)}`;
     const cached = cacheGet(key, 30 * 24 * 60 * 60 * 1000); // 流年建议缓存 30 天
     if (cached) {
       // 台湾不展示香港大师署名
@@ -205,7 +217,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const articles = getArticles(50)
       .filter(a => /运程|流年|方位|风水|犯太/.test(String(tw(a.title))) || (a.keywords || []).some(k => /运程|流年|方位|风水|犯太/.test(String(tw(k)))))
       .slice(0, 8);
-    const advice = await generateAnnualAdvice({ year, zodiac, bazi, articles });
+    const advice = await generateAnnualAdvice({ year, zodiac, bazi, articles, forceLocal: !entitled });
     if (region === 'tw') advice.masterSources = [];
     // 仅缓存 AI 模式结果；本地兜底结果不缓存（下一次 AI 恢复后自动换回 AI）
     if (advice.mode === 'ai') cacheSet(key, advice, 30 * 24 * 60 * 60 * 1000);
@@ -300,8 +312,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  // 每日开运关键词（本地规则 + AI 解读增强）：五行/天干/地支/方位/时辰/色彩 意象 + 彩讯数字意象
-  app.post<{ Body: { birth: BirthInput; date?: string; region?: string } }>('/api/lucky/daily', {
+  // 每日开运关键词（本地规则 + AI 解读增强，仅订阅用户）：五行/天干/地支/方位/时辰/色彩 意象 + 彩讯数字意象
+  app.post<{ Body: { birth: BirthInput; date?: string; region?: string; deviceId?: string } }>('/api/lucky/daily', {
     config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
   }, async (req, reply) => {
     const b = req.body?.birth;
@@ -311,7 +323,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const date = req.body.date ?? hkToday();
     if (!validDateStr(date)) return reply.code(400).send({ error: 'date 应为 YYYY-MM-DD 内的有效日期' });
     const region = isRegion(req.body?.region) ? req.body.region : 'hk';
-    const key = `lucky:${date}:${region}:${birthKey(birth)}`;
+    const entitled = isEntitled(String(req.body?.deviceId || ''));
+    const key = `lucky:${date}:${region}:${entitled ? 's' : 'n'}:${birthKey(birth)}`;
     const cached = cacheGet(key, 24 * 60 * 60 * 1000); // 每日关键词缓存 1 天
     if (cached) return cached;
     let result;
@@ -321,8 +334,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       reply.log.error({ err: e }, '开运关键词生成异常');
       return reply.code(400).send({ error: '该出生日期无法解析，请检查输入' });
     }
-    // AI 解读增强：AI 可用时用 AI 重写牌面释义与彩讯暗示；失败则保留本地结果
-    if (hasApiKey()) {
+    // AI 解读增强：仅订阅用户，AI 可用时用 AI 重写牌面释义与彩讯暗示；失败则保留本地结果
+    if (entitled && hasApiKey()) {
       try {
         const [range, bazi, almanac] = await Promise.all([
           getArticles(20),
@@ -366,6 +379,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       }
       try {
         const result = await verifyGoogleSubscription(productId, purchaseToken);
+        // 防一票多开：同一购买凭证只能归属一个设备（换机/误绑时拒绝，防止复制分享）
+        const existing = getSubscriptionByToken(purchaseToken);
+        if (existing && existing.deviceId !== deviceId) {
+          return reply.code(409).send({ error: '该购买凭证已绑定其他设备' });
+        }
         upsertSubscription({
           deviceId,
           productId: result.productId,

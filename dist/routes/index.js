@@ -79,6 +79,17 @@ function aiModeName() {
     const providers = (0, aiService_1.availableProviders)();
     return providers.join(' → ');
 }
+/** 是否拥有有效订阅（active / in_trial / grace_period 且未过期） */
+function isEntitled(deviceId) {
+    if (!deviceId || deviceId.length < 8 || deviceId.length > 64)
+        return false;
+    const sub = (0, store_1.getSubscription)(deviceId);
+    if (!sub)
+        return false;
+    if (sub.expiryMs > 0 && sub.expiryMs < Date.now())
+        return false;
+    return sub.status === 'active' || sub.status === 'in_trial' || sub.status === 'grace_period';
+}
 async function registerRoutes(app) {
     // 所有响应统一转繁体输出
     app.addHook('onSend', async (_req, reply, payload) => {
@@ -126,7 +137,7 @@ async function registerRoutes(app) {
             return reply.code(400).send({ error: '无法解析该日期' });
         }
     });
-    // 今日个性化宜忌（八字+黄历+大师文章 → AI）
+    // 今日个性化宜忌（八字+黄历+大师文章 → AI；无订阅回退本地规则）
     app.post('/api/daily/advice', {
         config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
     }, async (req, reply) => {
@@ -140,7 +151,9 @@ async function registerRoutes(app) {
         if (!validDateStr(date))
             return reply.code(400).send({ error: 'date 应为 YYYY-MM-DD 内的有效日期' });
         const region = (0, customRegions_1.isRegion)(req.body?.region) ? req.body.region : 'hk';
-        const key = `daily:${date}:${birthKey(birth)}`;
+        const entitled = isEntitled(String(req.body?.deviceId || ''));
+        // 缓存 key 区分订阅状态，避免未订阅用户命中已订阅用户的 AI 缓存
+        const key = `daily:${date}:${entitled ? 's' : 'n'}:${birthKey(birth)}`;
         const cached = (0, store_1.cacheGet)(key, 24 * 60 * 60 * 1000); // 每日宜忌缓存 1 天，次日自动重算
         if (cached) {
             // 台湾不展示香港大师署名
@@ -165,7 +178,7 @@ async function registerRoutes(app) {
         ]);
         const articles = (0, store_1.searchArticles)('运程').concat((0, store_1.searchArticles)('风水')).concat(range)
             .filter((a, i, arr) => arr.findIndex(x => x.url === a.url) === i).slice(0, 8);
-        const advice = await (0, aiService_1.generateDailyAdvice)({ date, almanac, bazi, articles });
+        const advice = await (0, aiService_1.generateDailyAdvice)({ date, almanac, bazi, articles, forceLocal: !entitled });
         if (region === 'tw')
             advice.sources = [];
         // 仅缓存 AI 模式结果；本地兜底结果不缓存（下一次 AI 恢复后自动换回 AI）
@@ -184,7 +197,7 @@ async function registerRoutes(app) {
             return reply.code(404).send({ error: `未知生肖：${zodiac}` });
         return { year, note: '请指定 zodiac 参数（鼠牛虎兔龙蛇马羊猴鸡狗猪 之一）' };
     });
-    // 流年方位 + 出行建议（八字+大师方位数据 → AI）
+    // 流年方位 + 出行建议（八字+大师方位数据 → AI；无订阅回退本地规则）
     app.post('/api/annual/advice', {
         config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
     }, async (req, reply) => {
@@ -207,7 +220,8 @@ async function registerRoutes(app) {
             return reply.code(400).send({ error: '无法解析该出生日期（可能农历日期不存在）' });
         }
         const zodiac = bazi.shengXiao;
-        const key = `annual:${year}:${zodiac}:${birthKey(birth)}`;
+        const entitled = isEntitled(String(req.body?.deviceId || ''));
+        const key = `annual:${year}:${zodiac}:${entitled ? 's' : 'n'}:${birthKey(birth)}`;
         const cached = (0, store_1.cacheGet)(key, 30 * 24 * 60 * 60 * 1000); // 流年建议缓存 30 天
         if (cached) {
             // 台湾不展示香港大师署名
@@ -221,7 +235,7 @@ async function registerRoutes(app) {
         const articles = (0, store_1.getArticles)(50)
             .filter(a => /运程|流年|方位|风水|犯太/.test(String((0, zhTradition_1.tw)(a.title))) || (a.keywords || []).some(k => /运程|流年|方位|风水|犯太/.test(String((0, zhTradition_1.tw)(k)))))
             .slice(0, 8);
-        const advice = await (0, aiService_1.generateAnnualAdvice)({ year, zodiac, bazi, articles });
+        const advice = await (0, aiService_1.generateAnnualAdvice)({ year, zodiac, bazi, articles, forceLocal: !entitled });
         if (region === 'tw')
             advice.masterSources = [];
         // 仅缓存 AI 模式结果；本地兜底结果不缓存（下一次 AI 恢复后自动换回 AI）
@@ -318,7 +332,7 @@ async function registerRoutes(app) {
             return reply.code(400).send({ error: '该日期无法解析，请更换日期' });
         }
     });
-    // 每日开运关键词（本地规则 + AI 解读增强）：五行/天干/地支/方位/时辰/色彩 意象 + 彩讯数字意象
+    // 每日开运关键词（本地规则 + AI 解读增强，仅订阅用户）：五行/天干/地支/方位/时辰/色彩 意象 + 彩讯数字意象
     app.post('/api/lucky/daily', {
         config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     }, async (req, reply) => {
@@ -332,7 +346,8 @@ async function registerRoutes(app) {
         if (!validDateStr(date))
             return reply.code(400).send({ error: 'date 应为 YYYY-MM-DD 内的有效日期' });
         const region = (0, customRegions_1.isRegion)(req.body?.region) ? req.body.region : 'hk';
-        const key = `lucky:${date}:${region}:${birthKey(birth)}`;
+        const entitled = isEntitled(String(req.body?.deviceId || ''));
+        const key = `lucky:${date}:${region}:${entitled ? 's' : 'n'}:${birthKey(birth)}`;
         const cached = (0, store_1.cacheGet)(key, 24 * 60 * 60 * 1000); // 每日关键词缓存 1 天
         if (cached)
             return cached;
@@ -344,8 +359,8 @@ async function registerRoutes(app) {
             reply.log.error({ err: e }, '开运关键词生成异常');
             return reply.code(400).send({ error: '该出生日期无法解析，请检查输入' });
         }
-        // AI 解读增强：AI 可用时用 AI 重写牌面释义与彩讯暗示；失败则保留本地结果
-        if ((0, aiService_1.hasApiKey)()) {
+        // AI 解读增强：仅订阅用户，AI 可用时用 AI 重写牌面释义与彩讯暗示；失败则保留本地结果
+        if (entitled && (0, aiService_1.hasApiKey)()) {
             try {
                 const [range, bazi, almanac] = await Promise.all([
                     (0, store_1.getArticles)(20),
@@ -387,6 +402,11 @@ async function registerRoutes(app) {
         }
         try {
             const result = await (0, purchaseService_1.verifyGoogleSubscription)(productId, purchaseToken);
+            // 防一票多开：同一购买凭证只能归属一个设备（换机/误绑时拒绝，防止复制分享）
+            const existing = (0, store_1.getSubscriptionByToken)(purchaseToken);
+            if (existing && existing.deviceId !== deviceId) {
+                return reply.code(409).send({ error: '该购买凭证已绑定其他设备' });
+            }
             (0, store_1.upsertSubscription)({
                 deviceId,
                 productId: result.productId,
